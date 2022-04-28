@@ -5,7 +5,9 @@ import JSONSchemaSyntax
 import Control.Monad
 
 validNames :: [String]
-validNames = [ c : s | s <- "": validNames, c <- ['a'..'z'] ++ ['0'..'9'] ]
+validNames = [ c : s | s <- "": validNames, c <- ['a'..'z'] ]
+
+-- Scalar Generators
 
 genNullSchema :: Gen JSONSchema
 genNullSchema = pure JSONNullSchema
@@ -35,6 +37,8 @@ genNumberRes = do n1 <- arbitrary
                   e2 <- elements [Max (max n1 n2), ExMax (max n1 n2)]
                   sublistOf [e1, e2, Mult n3]
 
+-- Composite Generators
+
 genObjectSchema :: Int -> Gen JSONSchema
 genObjectSchema n = JSONObjectSchema <$> genObjectRes n
 
@@ -61,13 +65,22 @@ genArrayRes n = do n1 <- abs <$> arbitrary
                    u  <- UniqueItems <$> arbitrary
                    sublistOf [i, u, MinItems (min n1 n2), MaxItems (max n1 n2)]
 
+genNotSchema :: Int -> Gen JSONSchema
+genNotSchema n = JSONNotSchema <$> genSchema (n `div` 2)
+
+genAllOfSchema :: Int -> Gen JSONSchema
+genAllOfSchema n = JSONAllOfSchema <$> listOf (genSchema (n `div` 2))
+
+genAnyOfSchema :: Int -> Gen JSONSchema
+genAnyOfSchema n = JSONAnyOfSchema <$> listOf (genSchema (n `div` 2))
+
 genSchema :: Int -> Gen JSONSchema
 genSchema n = if n < 5 
-    then frequency [(4, oneof scalarGens), (1, oneof (compositeGens n))]
-    else frequency [(1, oneof scalarGens), (4, oneof (compositeGens n))]
+    then oneof scalarGens
+    else frequency [(2, oneof scalarGens), (1, oneof (compositeGens n))]
     where 
         scalarGens      = [genNullSchema, genBoolSchema, genStringSchema, genNumberSchema]
-        compositeGens n = [genObjectSchema n, genArraySchema n]
+        compositeGens n = [genObjectSchema n, genArraySchema n, genNotSchema n, genAllOfSchema n, genAnyOfSchema n]
 
 instance Arbitrary JSONSchema where
     arbitrary   = sized genSchema

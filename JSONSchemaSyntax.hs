@@ -14,9 +14,9 @@ data JSONSchema = JSONNullSchema
                 | JSONIntegerSchema [JSONNumberRes]
                 | JSONObjectSchema [JSONObjectRes]
                 | JSONArraySchema [JSONArrayRes]
---                | Not JSONSchema
---                | AllOf [JSONSchema] -- non-empty
---                | AnyOf [JSONSchema] -- non-empty
+                | JSONNotSchema JSONSchema
+                | JSONAllOfSchema [JSONSchema] -- non-empty
+                | JSONAnyOfSchema [JSONSchema] -- non-empty
 --                | Enum [JValue] -- non-empty
 --                | Ref JPointer 
 --                deriving Show
@@ -63,6 +63,9 @@ instance Show JSONSchema where
         JSONIntegerSchema l -> "\"type\" : \"integer\", " ++ intercalate ", " (map show l)
         JSONObjectSchema l  -> "\"type\" : \"object\",\n" ++ intercalate ", " (map show l)
         JSONArraySchema l   -> "\"type\" : \"array\", \n" ++ intercalate ", " (map show l)
+        JSONNotSchema s     -> "\"not\" : { " ++ show s ++ " }"
+        JSONAllOfSchema l   -> "\"allOf\" : [\n  { " ++ intercalate " },\n  { " (map show l) ++ " }\n]"
+        JSONAnyOfSchema l   -> "\"anyOf\" : [\n  { " ++ intercalate " },\n  { " (map show l) ++ " }\n]"
 
 instance Show JSONStringRes where 
     show value = case value of 
