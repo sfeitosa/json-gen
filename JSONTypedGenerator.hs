@@ -3,7 +3,17 @@ module JSONTypedGenerator where
 import Test.QuickCheck
 import JSONSyntax
 import JSONSchemaSyntax
+import JSONSchemaGenerator hiding (validNames)
 import Data.Maybe
+import Data.List
+
+-- Parameters
+
+maxP :: Integer
+maxP = 10
+
+maxA :: Integer
+maxA = 10
 
 -- Restrictions
 
@@ -148,12 +158,64 @@ genTypedNumber nr = -- @todo: implement multipleOf
             JSONNumber <$> arbitrary `suchThat` (\n' -> n' < n) <*> listOf (choose (0, 9)) <*> pure 0
         _            -> JSONNumber <$> arbitrary <*> listOf (choose (0, 9)) <*> arbitrary
 
+genTypedObjectInfo :: Int -> [(String, Maybe JSONSchema)] -> Gen [(String, JSONValue)]
+genTypedObjectInfo n [] = return []
+genTypedObjectInfo n (x:xs) = 
+    case x of
+        (s, Just sch) -> do v  <- genTypedValue (n `div` 2) sch
+                            vs <- genTypedObjectInfo n xs
+                            return ((s, v) : vs)
+        (s, Nothing)  -> do v  <- genUntypedValue (n `div` 2)
+                            vs <- genTypedObjectInfo n xs
+                            return ((s, v) : vs)
 
 genTypedObject :: Int -> ObjectRes -> Gen JSONValue
 genTypedObject n or = 
-    case or of 
-        _ -> fmap JSONObject (listOf (objKV (n `div` 2)))
-    where objKV n = (,) <$> elements (take 1000 validNames) <*> genUntypedValue n
+    if mn > mx || length r > fromIntegral mx 
+        || (length p < fromIntegral mn && not add)  -- Invalid
+        then pure $ JSONObject []
+        else do re <- genTypedObjectInfo n (map (\n -> (n, lookup n p)) r)
+                n1 <- choose (length re, fromIntegral mx)
+                p' <- shuffle p
+                pr <- genTypedObjectInfo n (map (\(n,v) -> (n, Just v)) (take n1 p'))
+                n2 <- choose (length re + length pr, fromIntegral mx)
+                ad <- vectorOf n2 (uObjKV (n `div` 2))
+                return (JSONObject $ nubBy (\(x,_) (y,_) -> x == y) (re ++ pr ++ ad))
+    where mn  = fromMaybe 0 (minp or)
+          mx  = fromMaybe maxP (maxp or)
+          p   = fromMaybe [] (prop or)
+          r   = fromMaybe [] (req or)
+          add = fromMaybe True (addprop or)
+          uObjKV n = (,) <$> elements (take 1000 validNames) <*> genUntypedValue n
+
+genTypedArrayInfo :: Int -> [JSONSchema] -> Gen [JSONValue]
+genTypedArrayInfo n [] = return []
+genTypedArrayInfo n (x:xs) = do v  <- genTypedValue (n `div` 2) x
+                                vs <- genTypedArrayInfo n xs
+                                return (v : vs)
+
+genTypedArray :: Int -> ArrayRes -> Gen JSONValue
+genTypedArray n ar = 
+    if mn > mx -- Invalid
+        then pure $ JSONArray []
+        else 
+            case (prefixi ar) of 
+                Just l  -> do n1 <- choose (fromIntegral mn, length l)
+                              te <- genTypedArrayInfo n (take n1 l)
+                              n2 <- choose (length te, fromIntegral mx)
+                              ue <- vectorOf n2 (genUntypedValue (n `div` 2))
+                              return $ JSONArray (te ++ ue)
+                Nothing -> case (items ar) of 
+                               Just s -> do n' <- choose (mn, mx)
+                                            te <- vectorOf (fromIntegral n') (genTypedValue (n `div` 2) s)
+                                            return $ JSONArray te
+                               Nothing -> do n' <- choose (mn, mx)
+                                             ue <- vectorOf (fromIntegral n') (genUntypedValue (n `div` 2))
+                                             return $ JSONArray ue
+    where
+        mn = fromMaybe 0 (mini ar)
+        mx = fromMaybe maxA (maxi ar)
+        u  = fromMaybe False (uniq ar) -- @TODO: remove duplicates if True
 
 genTypedValue :: Int -> JSONSchema -> Gen JSONValue
 genTypedValue n s = 
@@ -164,12 +226,17 @@ genTypedValue n s =
         JSONNumberSchema l  -> genTypedNumber  $ toNumberRes newNumberRes l
         JSONIntegerSchema l -> genTypedInteger $ toNumberRes newNumberRes l
         JSONObjectSchema l  -> genTypedObject (n `div` 2) $ toObjectRes newObjectRes l
+        JSONArraySchema l   -> genTypedArray (n `div` 2) $ toArrayRes newArrayRes l
 
 genUntypedValue :: Int -> Gen JSONValue
 genUntypedValue n = if n < 5 
-    then frequency [(4, oneof scalarGens), (1, oneof (compositeGens n))]
+    then oneof scalarGens
     else frequency [(2, oneof scalarGens), (1, oneof (compositeGens n))]
     where 
-        scalarGens      = [genNull, genBool, genTypedNumber newNumberRes, genTypedInteger newNumberRes, genTypedString newStringRes]
-        compositeGens n = [genTypedObject n newObjectRes]
+        scalarGens      = [genNull, genBool, 
+                           genTypedNumber newNumberRes, 
+                           genTypedInteger newNumberRes, 
+                           genTypedString newStringRes]
+        compositeGens n = [genTypedObject n newObjectRes, 
+                           genTypedArray n newArrayRes]
     
